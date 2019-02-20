@@ -94,22 +94,17 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 // for each incoming connection. Accept blocks until the listener
 // returns a non-nil error. The caller typically invokes Accept in a
 // go statement.
-func (server *Server) Accept(lis net.Listener) {
+func (server *Server) Accept(lis net.Listener) error {
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
-			log.Print("rpc.Serve: accept:", err.Error())
-			return
+			return err
 		}
 		go server.ServeConn(conn)
 	}
 }
 
 // Serve Serve
-func (server *Server) Serve(url string) {
-	// if conn, err := amqp.Dial(url); err != nil {
-	// 	failOnError(err, "Failed to connect to MQServer")
-	// } else {
-	// 	server.ServeConn(conn, queue)
-	// }
+func (server *Server) Serve(serviceName string, consulAddress string, localIP string, portRange []int) error {
+	return server.consulServe(serviceName, consulAddress, localIP, portRange)
 }
