@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/rpc"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,7 +59,7 @@ func NewClient(conn io.ReadWriteCloser) *rpc.Client {
 type Client struct {
 	serviceName string
 	consuls     []string
-	seq         int
+	seq         uint32
 
 	netClients  []*netClient
 	refreshTime time.Time
@@ -67,12 +69,15 @@ type Client struct {
 type netClient struct {
 	id string
 	c  *rpc.Client
+
+	enable bool
 }
 
 func (client *Client) refreshClients() {
 	ncMap := map[string]*netClient{}
 	for _, nc := range client.netClients {
 		ncMap[nc.id] = nc
+		nc.enable = false
 	}
 
 	services := client.getServices()
@@ -81,16 +86,26 @@ func (client *Client) refreshClients() {
 		nc, ok := ncMap[s.Service.ID]
 		if ok && nc != nil {
 			newNetClients = append(newNetClients, nc)
+			nc.enable = true
 		} else {
 			conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", s.Service.Address, s.Service.Port))
 			if err != nil {
-				log.Println(err)
+				log.Println("[nrpc client] tcp Dial failure, " + err.Error())
 				continue
 			}
-			nc = &netClient{s.Service.ID, NewClient(conn)}
+			nc = &netClient{s.Service.ID, NewClient(conn), true}
+			log.Println("[nrpc client] new conn, " + nc.id)
 			newNetClients = append(newNetClients, nc)
 		}
 	}
+
+	for _, nc := range client.netClients {
+		if !nc.enable {
+			log.Println("[nrpc client] close conn, " + nc.id)
+			nc.c.Close()
+		}
+	}
+
 	client.netClients = newNetClients
 }
 
@@ -108,8 +123,11 @@ func (client *Client) getNetClient(needRefresh bool) (*netClient, error) {
 	if clientLen == 0 {
 		return nil, errors.New("no can use service")
 	}
-	nc := client.netClients[client.seq%clientLen]
+	nc := client.netClients[client.seq%uint32(clientLen)]
 	client.seq++
+	if client.seq > math.MaxUint32 {
+		client.seq = 0
+	}
 	return nc, nil
 }
 
@@ -117,12 +135,13 @@ func (client *Client) getNetClient(needRefresh bool) (*netClient, error) {
 func (client *Client) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	nc, err := client.getNetClient(false)
 	if err != nil {
-		return nil
+		return err
 	}
 	err = nc.c.Call(serviceMethod, args, reply)
 	if err != nil {
-		if err.Error() == "connection is shut down" {
-			log.Println("connection is shut down, refersh client and get new one!")
+		errorText := err.Error()
+		if strings.Contains(errorText, "connection is shut down") || strings.Contains(errorText, "connection reset by peer") {
+			log.Println("[nrpc client] "+errorText+", refersh clients and get new one!", args)
 			nc, err = client.getNetClient(true)
 			if err != nil {
 				return nil
