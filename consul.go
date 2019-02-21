@@ -71,3 +71,24 @@ func (server *Server) consulServe(serviceName string, consuls []string, localIP 
 	}
 	return server.Accept(listen)
 }
+
+func (c *Client) getServices() []*consulapi.ServiceEntry {
+	for _, consulAddress := range c.consuls {
+		config := consulapi.DefaultConfig()
+		config.Address = consulAddress
+		client, err := consulapi.NewClient(config)
+		if err != nil {
+			log.Printf("try consul address %s fail, consul client error: %s", consulAddress, err)
+			continue
+		}
+
+		addrs, _, err := client.Health().Service(c.serviceName, "", true, nil)
+		if err != nil {
+			log.Printf("try consul address %s fail, discovery server error: %s", consulAddress, err)
+			continue
+		}
+		log.Printf("try consul address %s succ", consulAddress)
+		return addrs
+	}
+	return nil
+}

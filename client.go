@@ -4,9 +4,14 @@ package nrpc
 
 import (
 	"bufio"
+	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/rpc"
+	"sync"
+	"time"
 
 	"github.com/vmihailenco/msgpack"
 )
@@ -48,11 +53,91 @@ func NewClient(conn io.ReadWriteCloser) *rpc.Client {
 	return rpc.NewClientWithCodec(client)
 }
 
-// Dial connects to a MSGPACK-RPC server at the specified network address.
-func Dial(network, address string) (*rpc.Client, error) {
-	conn, err := net.Dial(network, address)
-	if err != nil {
-		return nil, err
+// Client Client
+type Client struct {
+	serviceName string
+	consuls     []string
+	seq         int
+
+	netClients  []*netClient
+	refreshTime time.Time
+	mutex       sync.Mutex
+}
+
+type netClient struct {
+	id string
+	c  *rpc.Client
+}
+
+func (client *Client) refreshClients() {
+	ncMap := map[string]*netClient{}
+	for _, nc := range client.netClients {
+		ncMap[nc.id] = nc
 	}
-	return NewClient(conn), err
+
+	services := client.getServices()
+	var newNetClients []*netClient
+	for _, s := range services {
+		nc, ok := ncMap[s.Service.ID]
+		if ok && nc != nil {
+			newNetClients = append(newNetClients, nc)
+		} else {
+			conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", s.Service.Address, s.Service.Port))
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			nc = &netClient{s.Service.ID, NewClient(conn)}
+			newNetClients = append(newNetClients, nc)
+		}
+	}
+	client.netClients = newNetClients
+}
+
+func (client *Client) getNetClient(needRefresh bool) (*netClient, error) {
+	client.mutex.Lock()
+	defer client.mutex.Unlock()
+
+	now := time.Now()
+	if len(client.netClients) == 0 || now.Sub(client.refreshTime) > 5*time.Second || needRefresh {
+		client.refreshClients()
+		client.refreshTime = now
+	}
+
+	clientLen := len(client.netClients)
+	if clientLen == 0 {
+		return nil, errors.New("no can use service")
+	}
+	nc := client.netClients[client.seq%clientLen]
+	client.seq++
+	return nc, nil
+}
+
+// Call invokes the named function, waits for it to complete, and returns its error status.
+func (client *Client) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	nc, err := client.getNetClient(false)
+	if err != nil {
+		return nil
+	}
+	err = nc.c.Call(serviceMethod, args, reply)
+	if err != nil {
+		if err.Error() == "connection is shut down" {
+			log.Println("connection is shut down, refersh client and get new one!")
+			nc, err = client.getNetClient(true)
+			if err != nil {
+				return nil
+			}
+			err = nc.c.Call(serviceMethod, args, reply)
+		}
+	}
+	return err
+}
+
+// Dial Dial
+func Dial(serviceName string, consuls []string) (*Client, error) {
+	return &Client{
+		serviceName: serviceName,
+		consuls:     consuls,
+	}, nil
+
 }

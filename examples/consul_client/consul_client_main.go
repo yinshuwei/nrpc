@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	cli, err := nrpc.Dial("tcp", "127.0.0.1:8003")
+	cli, err := nrpc.Dial("haha", []string{"127.0.0.1:8109", "127.0.0.1:8501"})
 	if err != nil {
 		log.Println(err)
 	}
@@ -17,7 +17,6 @@ func main() {
 		if err != nil {
 			log.Println(err)
 		}
-
 		log.Println(reply)
 	}
 }
