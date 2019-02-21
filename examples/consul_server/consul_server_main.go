@@ -28,7 +28,12 @@ func (t *Arith) Add(args *Args, reply *Reply) error {
 func main() {
 	sever := nrpc.NewServer()
 	sever.Register(&Arith{})
-	err := sever.Serve("haha", []string{"127.0.0.1:8109", "127.0.0.1:8501", "127.0.0.1:8502", "127.0.0.1:8503"}, "172.17.0.1", []int{8001, 8002, 8003, 8004, 8005})
+	err := sever.Serve(
+		"carts_v4", // server_name
+		[]string{"127.0.0.1:8109", "127.0.0.1:8501", "127.0.0.1:8502", "127.0.0.1:8503"}, // consol address
+		"172.17.0.1",                        // local ip
+		[]int{8001, 8002, 8003, 8004, 8005}, // local ports
+	)
 	if err != nil {
 		log.Println(err)
 	}

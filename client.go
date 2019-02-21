@@ -153,7 +153,7 @@ func (client *Client) Call(serviceMethod string, args interface{}, reply interfa
 			strings.Contains(errorText, "read: connection reset by peer") ||
 			strings.Contains(errorText, "unexpected EOF") ||
 			strings.Contains(errorText, "write: broken pipe") {
-			log.Println("[nrpc client] " + errorText + ", refersh clients and get other one!")
+			log.Println("[nrpc client] " + errorText + ", refersh clients and use other one!")
 			nc, err = client.getNetClient(nc)
 			if err != nil {
 				return nil
