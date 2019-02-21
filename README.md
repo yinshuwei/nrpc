@@ -65,7 +65,10 @@ docker-compose.yml
 docker-compose
     docker-compost up
 
+#### go get
+    go get -u -v github.com/yinshuwei/nrpc
 
+#### 服务端代码
 server.go
 
     package main
@@ -109,6 +112,7 @@ server.go
         }
     }
 
+#### 客户端代码
 
 client.go
 
@@ -116,7 +120,7 @@ client.go
 
     import (
         "log"
-        "nrpc"
+        "github.com/yinshuwei/nrpc"
     )
 
     func main() {
