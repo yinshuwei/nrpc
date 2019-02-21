@@ -4,10 +4,14 @@ package nrpc
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/rpc"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/vmihailenco/msgpack"
 )
@@ -61,7 +65,33 @@ func (c *serverCodec) Close() error {
 
 // Server Server
 type Server struct {
-	s *rpc.Server
+	s           *rpc.Server
+	onShutdowns []func(server *Server)
+}
+
+func (server *Server) listenShutdown() {
+	go func(server *Server) {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, syscall.SIGKILL, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGUSR1, syscall.SIGUSR2)
+		for s := range c {
+			switch s {
+			case syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
+				fmt.Println("exit, ", s)
+				if nil != server.onShutdowns && len(server.onShutdowns) > 0 {
+					for _, sd := range server.onShutdowns {
+						sd(server)
+					}
+				}
+				os.Exit(0)
+			case syscall.SIGUSR1:
+				fmt.Println("usr1, ", s)
+			case syscall.SIGUSR2:
+				fmt.Println("usr2, ", s)
+			default:
+				fmt.Println("other, ", s)
+			}
+		}
+	}(server)
 }
 
 // NewServer NewServer
@@ -105,6 +135,7 @@ func (server *Server) Accept(lis net.Listener) error {
 }
 
 // Serve Serve
-func (server *Server) Serve(serviceName string, consulAddress string, localIP string, portRange []int) error {
-	return server.consulServe(serviceName, consulAddress, localIP, portRange)
+func (server *Server) Serve(serviceName string, consuls []string, localIP string, portRange []int) error {
+	server.listenShutdown()
+	return server.consulServe(serviceName, consuls, localIP, portRange)
 }

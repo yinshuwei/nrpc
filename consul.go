@@ -10,7 +10,7 @@ import (
 	consulapi "github.com/hashicorp/consul/api"
 )
 
-func (server *Server) consulServe(serviceName string, consulAddress string, localIP string, portRange []int) error {
+func (server *Server) consulServe(serviceName string, consuls []string, localIP string, portRange []int) error {
 	var err error
 	localPort := 0
 	var listen net.Listener
@@ -20,7 +20,7 @@ func (server *Server) consulServe(serviceName string, consulAddress string, loca
 		if err != nil {
 			log.Printf("try port %d fail", port)
 		} else {
-			log.Printf("try port %d success", port)
+			log.Printf("try port %d succ", port)
 			localPort = port
 			break
 		}
@@ -29,15 +29,9 @@ func (server *Server) consulServe(serviceName string, consulAddress string, loca
 		return errors.New("server tcp accept fail: no port can use")
 	}
 
-	config := consulapi.DefaultConfig()
-	config.Address = consulAddress
-	client, err := consulapi.NewClient(config)
-	if err != nil {
-		return errors.New("consul client error: " + err.Error())
-	}
+	consulsSucc := false
 	serviceID := fmt.Sprintf("%s:%s:%d", serviceName, localIP, localPort)
-
-	err = client.Agent().ServiceRegister(&consulapi.AgentServiceRegistration{
+	service := &consulapi.AgentServiceRegistration{
 		Port:    localPort,
 		Name:    serviceName,
 		ID:      serviceID,
@@ -49,9 +43,31 @@ func (server *Server) consulServe(serviceName string, consulAddress string, loca
 			Interval:                       "2s",
 			DeregisterCriticalServiceAfter: "2s",
 		},
-	})
-	if err != nil {
-		return errors.New("register server error: " + err.Error())
+	}
+	for _, consulAddress := range consuls {
+		config := consulapi.DefaultConfig()
+		config.Address = consulAddress
+		client, err := consulapi.NewClient(config)
+		if err != nil {
+			log.Printf("try consul address %s fail, consul client error: %s", consulAddress, err)
+			continue
+		}
+
+		err = client.Agent().ServiceRegister(service)
+		if err != nil {
+			log.Printf("try consul address %s fail, register server error: %s", consulAddress, err)
+			continue
+		}
+		log.Printf("try consul address %s succ", consulAddress)
+		consulsSucc = true
+		server.onShutdowns = append(server.onShutdowns, func(server *Server) {
+			log.Println("Service Deregister")
+			client.Agent().ServiceDeregister(serviceID)
+		})
+		break
+	}
+	if !consulsSucc {
+		return errors.New("register server fail")
 	}
 	return server.Accept(listen)
 }
