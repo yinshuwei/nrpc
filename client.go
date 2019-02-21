@@ -128,7 +128,7 @@ func (client *Client) getNetClient(oldNc *netClient) (*netClient, error) {
 	tryCount := 0
 	for nc == nil || !nc.enable {
 		if tryCount >= clientLen {
-			return nil, errors.New("[nrpc client] call service failure, no available services")
+			return nil, errors.New("[nrpc client] call service failure, no available services: " + client.serviceName)
 		}
 		nc = client.netClients[client.seq%uint32(clientLen)]
 		client.seq++
