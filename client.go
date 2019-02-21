@@ -109,23 +109,32 @@ func (client *Client) refreshClients() {
 	client.netClients = newNetClients
 }
 
-func (client *Client) getNetClient(needRefresh bool) (*netClient, error) {
+func (client *Client) getNetClient(oldNc *netClient) (*netClient, error) {
 	client.mutex.Lock()
 	defer client.mutex.Unlock()
 
+	if oldNc != nil {
+		oldNc.enable = false
+	}
+
 	now := time.Now()
-	if len(client.netClients) == 0 || now.Sub(client.refreshTime) > 5*time.Second || needRefresh {
+	if len(client.netClients) == 0 || now.Sub(client.refreshTime) > 5*time.Second {
 		client.refreshClients()
 		client.refreshTime = now
 	}
 
 	clientLen := len(client.netClients)
-	if clientLen == 0 {
-		return nil, errors.New("no can use service")
+	var nc *netClient
+	tryCount := 0
+	for nc == nil || !nc.enable {
+		if tryCount >= clientLen {
+			return nil, errors.New("[nrpc client] call service failure, no available services")
+		}
+		nc = client.netClients[client.seq%uint32(clientLen)]
+		client.seq++
+		tryCount++
 	}
-	nc := client.netClients[client.seq%uint32(clientLen)]
-	client.seq++
-	if client.seq > math.MaxUint32 {
+	if client.seq > math.MaxUint32-100000 {
 		client.seq = 0
 	}
 	return nc, nil
@@ -133,16 +142,19 @@ func (client *Client) getNetClient(needRefresh bool) (*netClient, error) {
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
 func (client *Client) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	nc, err := client.getNetClient(false)
+	nc, err := client.getNetClient(nil)
 	if err != nil {
 		return err
 	}
 	err = nc.c.Call(serviceMethod, args, reply)
 	if err != nil {
 		errorText := err.Error()
-		if strings.Contains(errorText, "connection is shut down") || strings.Contains(errorText, "connection reset by peer") {
-			log.Println("[nrpc client] "+errorText+", refersh clients and get new one!", args)
-			nc, err = client.getNetClient(true)
+		if strings.Contains(errorText, "connection is shut down") ||
+			strings.Contains(errorText, "read: connection reset by peer") ||
+			strings.Contains(errorText, "unexpected EOF") ||
+			strings.Contains(errorText, "write: broken pipe") {
+			log.Println("[nrpc client] " + errorText + ", refersh clients and get other one!")
+			nc, err = client.getNetClient(nc)
 			if err != nil {
 				return nil
 			}
@@ -158,5 +170,4 @@ func Dial(serviceName string, consuls []string) (*Client, error) {
 		serviceName: serviceName,
 		consuls:     consuls,
 	}, nil
-
 }
