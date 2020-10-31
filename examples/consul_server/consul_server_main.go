@@ -2,7 +2,8 @@ package main
 
 import (
 	"log"
-	"nrpc"
+
+	"github.com/yinshuwei/nrpc"
 )
 
 // Args Args
